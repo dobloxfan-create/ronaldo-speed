@@ -3,46 +3,40 @@ name: Multi-RDP
 on:
   workflow_dispatch:
     inputs:
-      instance_count:
-        description: 'Number of computers (just logic, max depends on account)'
-        required: false
-        default: '1'
+      # This allows you to type a password when starting the workflow
+      user_password:
+        description: 'Set your RDP Password'
+        required: true
+        default: 'Mypc@123456' 
 
 jobs:
   secure-rdp:
     runs-on: windows-latest
-    timeout-minutes: 360 # GitHub Free limit is usually 6 hours (360 mins)
+    timeout-minutes: 360
     
-    # This strategy allows running multiple computers in parallel
     strategy:
       fail-fast: false
       matrix:
-        # This list creates the computers. Add more numbers to make more computers.
-        # Example: [1, 2, 3, 4] will create 4 computers.
-        machine_id: [1, 2] 
+        # Edit this list to create more computers (e.g., [1, 2, 3])
+        machine_id: [1, 2]
 
     steps:
-      - name: 1. Setup RDP & Firewall (Simplified)
+      - name: 1. Setup RDP & Firewall
         run: |
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
-          
-          # Allow RDP through firewall
           netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes
-          
-      - name: 2. Create Secure User
+
+      - name: 2. Create User (Custom Password)
         run: |
-          # Generates a random 12-char password
-          $pass = -join ((33..126) | Get-Random -Count 12 | % {[char]$_})
-          
-          # Create user and add to admin groups
+          # Takes the password from your input box
+          $pass = "${{ inputs.user_password }}"
           $securePass = ConvertTo-SecureString $pass -AsPlainText -Force
+          
+          # Creates the user
           New-LocalUser -Name "RDPUser" -Password $securePass -Description "Github Runner"
           Add-LocalGroupMember -Group "Administrators" -Member "RDPUser"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDPUser"
-          
-          # Save credentials to env for later display
-          echo "RDP_PASS=$pass" >> $env:GITHUB_ENV
 
       - name: 3. Install Tailscale
         run: |
@@ -51,30 +45,27 @@ jobs:
 
       - name: 4. Connect to Tailscale
         run: |
-          # Refreshes environment to find tailscale command
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           
-          # Connects using the secret key. 
-          # Hostname includes the Matrix ID so computers don't conflict (e.g., gh-rdp-1, gh-rdp-2)
+          # Connects using the secret key with a unique name for this computer
           tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname="gh-rdp-${{ strategy.job-index }}-${{ github.run_id }}" --ssh
           
           $tsIP = tailscale ip -4
           echo "TS_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: 5. Display Connection Info
+      - name: 5. Connection Details
         run: |
           Write-Host "============================================="
-          Write-Host "   COMPUTER IS READY: ${{ matrix.machine_id }}"
+          Write-Host "   COMPUTER ${{ matrix.machine_id }} IS READY"
           Write-Host "---------------------------------------------"
           Write-Host "   IP Address : $env:TS_IP"
           Write-Host "   Username   : RDPUser"
-          Write-Host "   Password   : $env:RDP_PASS"
+          Write-Host "   Password   : ${{ inputs.user_password }}"
           Write-Host "============================================="
 
       - name: 6. Keep Alive
         run: |
-          # Keep the session running until timeout
           while ($true) {
             Start-Sleep -Seconds 60
-            Write-Host "Computer ${{ matrix.machine_id }} is active..."
+            Write-Host "Computer ${{ matrix.machine_id }} is running..."
           }
