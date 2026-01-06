@@ -1,13 +1,7 @@
-name: Multi-RDP
+name: Multi-RDP-Easy
 
 on:
   workflow_dispatch:
-    inputs:
-      # This allows you to type a password when starting the workflow
-      user_password:
-        description: 'Set your RDP Password'
-        required: true
-        default: 'Mypc@123456' 
 
 jobs:
   secure-rdp:
@@ -17,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Edit this list to create more computers (e.g., [1, 2, 3])
+        # This creates 2 computers. Add numbers [1, 2, 3] for more.
         machine_id: [1, 2]
 
     steps:
@@ -27,14 +21,16 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
           netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes
 
-      - name: 2. Create User (Custom Password)
+      - name: 2. Create User (User@123)
         run: |
-          # Takes the password from your input box
-          $pass = "${{ inputs.user_password }}"
+          # We use User@123 because it satisfies Windows Security but is easy to type
+          $pass = "User@123"
           $securePass = ConvertTo-SecureString $pass -AsPlainText -Force
           
-          # Creates the user
-          New-LocalUser -Name "RDPUser" -Password $securePass -Description "Github Runner"
+          # Create the user "RDPUser"
+          New-LocalUser -Name "RDPUser" -Password $securePass -Description "Github Runner" -AccountNeverExpires
+          
+          # Make them an Admin
           Add-LocalGroupMember -Group "Administrators" -Member "RDPUser"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDPUser"
 
@@ -47,20 +43,20 @@ jobs:
         run: |
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           
-          # Connects using the secret key with a unique name for this computer
+          # Connects to Tailscale
           tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname="gh-rdp-${{ strategy.job-index }}-${{ github.run_id }}" --ssh
           
           $tsIP = tailscale ip -4
           echo "TS_IP=$tsIP" >> $env:GITHUB_ENV
 
-      - name: 5. Connection Details
+      - name: 5. SUCCESS - LOGIN DETAILS
         run: |
           Write-Host "============================================="
-          Write-Host "   COMPUTER ${{ matrix.machine_id }} IS READY"
+          Write-Host "   COMPUTER ${{ matrix.machine_id }} READY"
           Write-Host "---------------------------------------------"
           Write-Host "   IP Address : $env:TS_IP"
           Write-Host "   Username   : RDPUser"
-          Write-Host "   Password   : ${{ inputs.user_password }}"
+          Write-Host "   Password   : User@123"
           Write-Host "============================================="
 
       - name: 6. Keep Alive
