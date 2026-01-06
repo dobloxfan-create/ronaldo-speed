@@ -1,4 +1,4 @@
-name: Multi-RDP-Easy
+name: Single-RDP-Easy
 
 on:
   workflow_dispatch:
@@ -7,12 +7,6 @@ jobs:
   secure-rdp:
     runs-on: windows-latest
     timeout-minutes: 360
-    
-    strategy:
-      fail-fast: false
-      matrix:
-        # This creates 2 computers. Add numbers [1, 2, 3] for more.
-        machine_id: [1, 2]
 
     steps:
       - name: 1. Setup RDP & Firewall
@@ -23,14 +17,12 @@ jobs:
 
       - name: 2. Create User (User@123)
         run: |
-          # We use User@123 because it satisfies Windows Security but is easy to type
+          # Simple password that meets Windows requirements
           $pass = "User@123"
           $securePass = ConvertTo-SecureString $pass -AsPlainText -Force
           
-          # Create the user "RDPUser"
+          # Create user RDPUser
           New-LocalUser -Name "RDPUser" -Password $securePass -Description "Github Runner" -AccountNeverExpires
-          
-          # Make them an Admin
           Add-LocalGroupMember -Group "Administrators" -Member "RDPUser"
           Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDPUser"
 
@@ -43,8 +35,8 @@ jobs:
         run: |
           $env:Path = [System.Environment]::GetEnvironmentVariable("Path","Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path","User")
           
-          # Connects to Tailscale
-          tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname="gh-rdp-${{ strategy.job-index }}-${{ github.run_id }}" --ssh
+          # Connects to Tailscale with a unique name based on the Run ID
+          tailscale up --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} --hostname="gh-rdp-${{ github.run_id }}" --ssh
           
           $tsIP = tailscale ip -4
           echo "TS_IP=$tsIP" >> $env:GITHUB_ENV
@@ -52,7 +44,7 @@ jobs:
       - name: 5. SUCCESS - LOGIN DETAILS
         run: |
           Write-Host "============================================="
-          Write-Host "   COMPUTER ${{ matrix.machine_id }} READY"
+          Write-Host "   COMPUTER IS READY"
           Write-Host "---------------------------------------------"
           Write-Host "   IP Address : $env:TS_IP"
           Write-Host "   Username   : RDPUser"
@@ -63,5 +55,5 @@ jobs:
         run: |
           while ($true) {
             Start-Sleep -Seconds 60
-            Write-Host "Computer ${{ matrix.machine_id }} is running..."
+            Write-Host "Computer is running..."
           }
