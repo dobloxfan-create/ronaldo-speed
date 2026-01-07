@@ -1,4 +1,4 @@
-name: RDP-No-App-Ngrok
+name: RDP-Windows
 
 on:
   workflow_dispatch:
