@@ -4,25 +4,37 @@ on:
   workflow_dispatch:
 
 jobs:
-  rdp-ngrok:
+  secure-rdp:
     runs-on: windows-latest
     timeout-minutes: 360
 
     steps:
-      - name: 1. Enable RDP & Create User
+      - name: Configure RDP Settings
         run: |
-          # Enable RDP
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0
+          # Enable Remote Desktop in Registry
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 0 -Force
           
-          # Create User: RDPUser / User@123
-          $pass = "User@123"
-          $securePass = ConvertTo-SecureString $pass -AsPlainText -Force
-          New-LocalUser -Name "RDPUser" -Password $securePass -Description "Github Runner" -AccountNeverExpires
-          Add-LocalGroupMember -Group "Administrators" -Member "RDPUser"
-          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDPUser"
+          # Allow RDP in Firewall
+          netsh advfirewall firewall set rule group="Remote Desktop" new enable=Yes
+          
+          # Force start the service
+          Set-Service -Name TermService -StartupType Automatic
+          Start-Service -Name TermService
 
-      - name: 2. Install & Start Ngrok
+      - name: Create RDP User (User@123)
+        run: |
+          # We use User@123 because "pc123" is too weak and Windows will block it.
+          $password = ConvertTo-SecureString "User@123" -AsPlainText -Force
+          
+          # Create the user "RDP"
+          New-LocalUser -Name "RDP" -Password $password -AccountNeverExpires -Description "RDP User"
+          
+          # Add to Admin groups
+          Add-LocalGroupMember -Group "Administrators" -Member "RDP"
+          Add-LocalGroupMember -Group "Remote Desktop Users" -Member "RDP"
+
+      - name: Install & Start Ngrok
         env:
           NGROK_AUTH_TOKEN: ${{ secrets.NGROK_AUTH_TOKEN }}
         run: |
@@ -30,46 +42,47 @@ jobs:
           Invoke-WebRequest -Uri "https://bin.equinox.io/c/bNyj1mQVY4c/ngrok-v3-stable-windows-amd64.zip" -OutFile "ngrok.zip"
           Expand-Archive "ngrok.zip" -DestinationPath "."
           
-          # Authenticate
+          # Add your token
           .\ngrok.exe config add-authtoken $env:NGROK_AUTH_TOKEN
           
-          # Start Tunnel in Background (TCP mode for RDP)
+          # Start the tunnel for Port 3389 (RDP)
           Start-Process -FilePath ".\ngrok.exe" -ArgumentList "tcp 3389" -NoNewWindow
           
-          # Wait for tunnel to start
-          Start-Sleep -Seconds 5
+          # Wait 10 seconds for it to connect
+          Start-Sleep -Seconds 10
 
-      - name: 3. GET YOUR PUBLIC ADDRESS
+      - name: GET CONNECTION ADDRESS
         run: |
-          # Get the public URL from Ngrok's local API
           $retries = 0
-          while ($retries -lt 10) {
+          while ($retries -lt 20) {
             try {
+              # Fetch the public URL from Ngrok
               $tunnels = Invoke-RestMethod -Uri "http://localhost:4040/api/tunnels" -ErrorAction Stop
               $url = $tunnels.tunnels[0].public_url
+              
               if ($url) {
-                # Remove "tcp://" to make it copy-paste friendly
+                # Clean up the URL (remove tcp://)
                 $cleanUrl = $url.Replace("tcp://", "")
                 
                 Write-Host "=========================================="
-                Write-Host "      LOGIN SUCCESSFUL (NO APP NEEDED)    "
+                Write-Host "      SUCCESS - COMPUTER READY"
                 Write-Host "------------------------------------------"
                 Write-Host "   Address  : $cleanUrl"
-                Write-Host "   Username : RDPUser"
+                Write-Host "   Username : RDP"
                 Write-Host "   Password : User@123"
                 Write-Host "=========================================="
                 break
               }
             } catch {
-              Write-Host "Waiting for Ngrok tunnel..."
+              Write-Host "Waiting for address... ($retries)"
               Start-Sleep -Seconds 2
             }
             $retries++
           }
 
-      - name: 4. Keep Alive
+      - name: Keep Alive
         run: |
+          Write-Host "RDP is running. Close this workflow to stop the computer."
           while ($true) {
             Start-Sleep -Seconds 60
-            Write-Host "RDP Session Active..."
           }
